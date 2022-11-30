@@ -155,8 +155,9 @@ function updateCustomerInquiryTrackingSheet(jobObj) {
       " " +
       jobObj.contact["contact[last_name]"],
     // Job Title
-    // Note: Should this be searching to see if the contact is working for the deal organization and choose that job title?
-    _.get(jobObj, "contact.accountContacts[0].jobTitle"),
+    // TODO: Should this be searching to see if the contact is working for the deal organization and choose that job title?
+    //_.get(jobObj, "contact.accountContacts[0].jobTitle"),
+    jobObj.deal.title,
     //Description
     _.get(jobObj, "deal.description"),
     // End User
@@ -170,7 +171,7 @@ function updateCustomerInquiryTrackingSheet(jobObj) {
       ? new Date(jobObj.deal.dateEstimateSent).toLocaleDateString("en-US")
       : "",
     // Deal Value / Budget
-    jobObj.deal.value,
+    jobObj.deal.formattedValue,
     // Channel - Deprecated Field
     "",
     // Type - Deprecated Field
@@ -290,6 +291,23 @@ function appendCustomFieldsToJobObject(jobObj) {
         customField.custom_field_id ===
         CUSTOM_FIELD_ID_MAP.ORGANIZATION.PHONE.toString() // These IDs are stored as strings!
     );
+
+  // Format the value of the deal
+  // Active Campaign returns a string with the cents numbers included and no decimal ?
+
+  jobObj.deal.formattedValue = _.get(jobObj.deal, "value", "");
+
+  if (jobObj.deal.formattedValue) {
+    jobObj.deal.formattedValue =
+      jobObj.deal.formattedValue.substring(
+        0,
+        jobObj.deal.formattedValue.length - 2
+      ) +
+      "." +
+      jobObj.deal.formattedValue.substring(
+        jobObj.deal.formattedValue.length - 2
+      );
+  }
 
   jobObj.organization.account.phone = _.get(
     organizationPhoneObj,
@@ -501,7 +519,7 @@ function updateDealGoogleFolderIds(jobObj) {
 function updateDealWithJobNumber(dealId, dealTitle, currentJobNumber) {
   let data = {
     deal: {
-      title: currentJobNumber + " " + dealTitle,
+      title: currentJobNumber.toString() + " " + dealTitle,
       fields: [
         {
           customFieldId: CUSTOM_FIELD_ID_MAP.DEAL.JOB_NUMBER,
@@ -701,8 +719,8 @@ function fillEstimateSheet(file, jobObj) {
           )
         : "",
     ],
-    // Budget
-    [jobObj.deal.value],
+    // Budget / Value
+    [jobObj.deal.formattedValue],
   ];
 
   const range = informationSheet.getRange("B3:B18");
