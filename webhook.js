@@ -547,7 +547,7 @@ function updateActiveCampaign(method, url, payload) {
 }
 
 /**
- * Creates a new job folder in Google Drive active jobs folder
+ * Creates a new job folder in Google Drive estimates jobs folder
  *
  * @param {number} jobNumber the job number
  * @param {string} jobTitle the title of the job
@@ -555,7 +555,9 @@ function updateActiveCampaign(method, url, payload) {
  * @return {object} an instance of the Google Apps Script Folder Class
  */
 function createNewJobFolder(jobNumber, jobTitle, organizationName) {
-  const activeJobfolder = DriveApp.getFolderById(CREDENTIALS.activeJobFolder);
+  const estimatesJobFolder = DriveApp.getFolderById(
+    CREDENTIALS.estimatesJobFolder
+  );
 
   let fullJobFolderName = jobNumber.toString().concat(" ", jobTitle);
 
@@ -563,7 +565,7 @@ function createNewJobFolder(jobNumber, jobTitle, organizationName) {
     fullJobFolderName = fullJobFolderName.concat(" ", organizationName);
   }
 
-  return activeJobfolder.createFolder(fullJobFolderName);
+  return estimatesJobFolder.createFolder(fullJobFolderName);
 }
 
 /**
