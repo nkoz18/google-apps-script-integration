@@ -7,19 +7,67 @@ const _ = LodashGS.load();
  * @return {object} message recieved object
  */
 function doPost(e) {
-  //   Logger.log(JSON.stringify(e));
+  Logger.log(`Deal update event triggered!`);
+  Logger.log(JSON.stringify(e.parameters));
 
-  const contactId = _.get(e, `parameter["contact[id]"]`);
-  const contactObj = _.get(e, `parameter`);
+  const stageTitle = _.get(e, `parameter["deal[stage_title]"]`, "");
 
+  // Check the updated fields to see if the deal was just moved into the discovery stage and does not already have a job number
+  let jobDiscoveryFlag = false;
+  let dealOrgAssigned = false;
+  let stageUpdated = false;
+  let jobNumber;
+
+  console.log("Parameter: ", JSON.stringify(e.parameter));
+
+  for (const [key, value] of Object.entries(e.parameter)) {
+    // console.log(`${key}: ${value}`);
+
+    if (key.includes("deal[orgname]") && value) {
+      Logger.log("The deal has an organization assigned.");
+      dealOrgAssigned = true;
+    }
+    if (key.includes("updated_fields") && value === "stage") {
+      Logger.log("One of the updated fields is the stage.");
+      stageUpdated = true;
+    }
+
+    // Check to see if the job number exists and filter out keys of recently updated fields
+    if (value === "Job Number" && !key.includes("updated_fields")) {
+      const jobNumberValueKey = key.replace("[key]", "[value]");
+      jobNumber = e.parameter[jobNumberValueKey];
+      Logger.log("Job Number is: " + jobNumber);
+    }
+  }
+
+  // remove this later
+  if (!dealOrgAssigned) {
+    Logger.log("Deal has no account set, stopping automation.");
+  }
+
+  if (
+    stageTitle === "Discovery" &&
+    !jobNumber &&
+    stageUpdated &&
+    dealOrgAssigned
+  ) {
+    jobDiscoveryFlag = true;
+    Logger.log(
+      'A deal without a job number was just updated to the "Discovery" stage.'
+    );
+  }
+
+  const dealId = _.get(e, `parameters["deal[id]"][0]`, null);
+  Logger.log(`Deal ID: ` + JSON.stringify(dealId));
+
+  const contactId = _.get(e, `parameters["deal[contactid]"][0]`, null);
   Logger.log(`Contact ID: ` + JSON.stringify(contactId));
 
-  if (contactId) {
-    const dealsObj = getContactDeals(contactId);
+  if (dealId && jobDiscoveryFlag) {
+    const dealObj = _.get(getDeal(dealId), `deal`, null);
+    const contactObj = _.get(getContact(contactId), `contact`, null);
 
-    if (dealsObj.deals.length) {
-      // Might need to sort here for the last modified deal so that we update the correct one.
-      const dealObj = dealsObj.deals[0];
+    if (dealObj) {
       const newJobNumber = getLatestJobNumber() + 1;
       const dealId = dealObj.id;
       const dealTitle = dealObj.title;
@@ -31,7 +79,7 @@ function doPost(e) {
       // Update Active Campaign deal with new job number
       updateDealWithJobNumber(dealId, dealTitle, newJobNumber);
 
-      const organizationId = _.get(dealsObj, `deals[0].organization`);
+      const organizationId = _.get(dealObj, `organization`);
 
       // if there is an orgnization add it to the job title in Google Drive
       if (organizationId) {
@@ -151,13 +199,10 @@ function updateCustomerInquiryTrackingSheet(jobObj) {
     // Client Company Name
     jobObj.organization?.account?.name,
     // Contact Name
-    jobObj.contact["contact[first_name]"] +
-      " " +
-      jobObj.contact["contact[last_name]"],
-    // Job Title
+    jobObj.contact["firstName"] + " " + jobObj.contact["lastName"],
+    // Job Title - Not to be confused with the deal title
     // TODO: Should this be searching to see if the contact is working for the deal organization and choose that job title?
-    //_.get(jobObj, "contact.accountContacts[0].jobTitle"),
-    jobObj.deal.title,
+    _.get(jobObj, "contact.accountContacts[0].jobTitle", ""),
     //Description
     _.get(jobObj, "deal.description"),
     // End User
@@ -183,7 +228,7 @@ function updateCustomerInquiryTrackingSheet(jobObj) {
     // Why Dead - Deprecated Field
     "",
     // Client Email
-    jobObj.contact["contact[email]"],
+    jobObj.contact["email"],
     // Notes
     _.get(jobObj, "deal.notes[0].note"),
   ]);
@@ -232,11 +277,21 @@ function appendCustomFieldsToJobObject(jobObj) {
   jobObj.deal.nda = _.get(ndaObj, "fieldValue[0]", "");
 
   // Get Industry
-  const industryObj = jobObj.organization.customerAccountCustomFieldData.find(
-    (customField) =>
-      customField.custom_field_id ===
-      CUSTOM_FIELD_ID_MAP.ORGANIZATION.INDUSTRY.toString() // These IDs are stored as strings!
+
+  let industryObj;
+
+  const organizationCustomFieldData = _.get(
+    jobObj.organization.customerAccountCustomFieldData,
+    null
   );
+
+  if (organizationCustomFieldData) {
+    industryObj = organizationCustomFieldData.find(
+      (customField) =>
+        customField.custom_field_id ===
+        CUSTOM_FIELD_ID_MAP.ORGANIZATION.INDUSTRY.toString() // These IDs are stored as strings!
+    );
+  }
 
   jobObj.organization.industry = _.get(
     industryObj,
@@ -358,7 +413,41 @@ function getOrganizationCustomFields(organizationId) {
 }
 
 /**
- * Fetches the deals from the Active Campaign API
+ * Fetches a deal by ID from Active Campaign API
+ *
+ * @param {number} dealId the ID of the deal in Active Campaign
+ * @return {object} the result of the fetch from the Active Campaign API
+ */
+function getDeal(dealId) {
+  const result = fetchFromActiveCampaign(
+    "get",
+    CREDENTIALS.activeCampaignBaseUrl + "deals/" + dealId
+  );
+
+  Logger.log("Deal Fetch Result: " + JSON.stringify(result));
+
+  return result;
+}
+
+/**
+ * Fetches a contact by ID from Active Campaign API
+ *
+ * @param {number} contactId the ID of the contact in Active Campaign
+ * @return {object} the result of the fetch from the Active Campaign API
+ */
+function getContact(contactId) {
+  const result = fetchFromActiveCampaign(
+    "get",
+    CREDENTIALS.activeCampaignBaseUrl + "contacts/" + contactId
+  );
+
+  Logger.log("Contact Fetch Result: " + JSON.stringify(result));
+
+  return result;
+}
+
+/**
+ * Fetches the deals for a contact from the Active Campaign API
  *
  * @param {number} contactId the contact ID in Active Campaign
  * @return {object} the result of the fetch from the Active Campaign API
@@ -669,20 +758,15 @@ function fillEstimateSheet(file, jobObj) {
     // Date of Inquiry
     [Utilities.formatDate(new Date(jobObj.deal.cdate), "GMT-7", "MM/dd/yyyy")],
     // Client Contact
-    [
-      jobObj.contact["contact[first_name]"].concat(
-        " ",
-        jobObj.contact["contact[last_name]"]
-      ),
-    ],
+    [jobObj.contact["firstName"].concat(" ", jobObj.contact["lastName"])],
     // Client Company
     [jobObj.organization?.account?.name],
     // Client Office Phone
     [jobObj.organization?.account?.phone],
     // Client Cell Phone
-    [jobObj.contact["contact[phone]"]],
+    [jobObj.contact["phone"]],
     // Client Email
-    [jobObj.contact["contact[email]"]],
+    [jobObj.contact["email"]],
     // End User
     [jobObj.deal.endUser],
     // Designer ??
